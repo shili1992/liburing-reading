@@ -288,6 +288,7 @@ int __io_uring_get_cqe(struct io_uring *ring,
 /*
  * Must be called after io_uring_for_each_cqe()
  */
+// 用户消费者， 将cq head + nr
 IOURINGINLINE void io_uring_cq_advance(struct io_uring *ring, unsigned nr)
 {
 	if (nr) {
@@ -305,6 +306,8 @@ IOURINGINLINE void io_uring_cq_advance(struct io_uring *ring, unsigned nr)
  * Must be called after io_uring_{peek,wait}_cqe() after the cqe has
  * been processed by the application.
  */
+// 用户消费者， 将cq head + nr.
+// 必须保证在 被app 处理之后，在调用该函数
 IOURINGINLINE void io_uring_cqe_seen(struct io_uring *ring,
 				     struct io_uring_cqe *cqe)
 {
@@ -1176,6 +1179,7 @@ IOURINGINLINE int io_uring_cq_eventfd_toggle(struct io_uring *ring,
  * readily available. Returns 0 with cqe_ptr filled in on success, -errno on
  * failure.
  */
+// 等待wait_nr 个 io 完成
 IOURINGINLINE int io_uring_wait_cqe_nr(struct io_uring *ring,
 				      struct io_uring_cqe **cqe_ptr,
 				      unsigned wait_nr)
@@ -1188,6 +1192,7 @@ IOURINGINLINE int io_uring_wait_cqe_nr(struct io_uring *ring,
  * "official" versions of this, io_uring_peek_cqe(), io_uring_wait_cqe(),
  * or io_uring_wait_cqes*().
  */
+//  获取一个 完成的cqe, 并且返回 当前完成的事件数量
 IOURINGINLINE int __io_uring_peek_cqe(struct io_uring *ring,
 				      struct io_uring_cqe **cqe_ptr,
 				      unsigned *nr_available)
@@ -1207,10 +1212,10 @@ IOURINGINLINE int __io_uring_peek_cqe(struct io_uring *ring,
 
 		cqe = NULL;
 		available = tail - head;
-		if (!available)
+		if (!available)  // 没有完成的io， 则直接退出
 			break;
 
-		cqe = &ring->cq.cqes[(head & mask) << shift];
+		cqe = &ring->cq.cqes[(head & mask) << shift]; // 获取一个要返回的 cqe
 		if (!(ring->features & IORING_FEAT_EXT_ARG) &&
 				cqe->user_data == LIBURING_UDATA_TIMEOUT) {
 			if (cqe->res < 0)
@@ -1234,26 +1239,28 @@ IOURINGINLINE int __io_uring_peek_cqe(struct io_uring *ring,
  * Return an IO completion, if one is readily available. Returns 0 with
  * cqe_ptr filled in on success, -errno on failure.
  */
+//  获取一个（或等待） 完成的cqe, 并且返回 当前完成的事件数量
 IOURINGINLINE int io_uring_peek_cqe(struct io_uring *ring,
 				    struct io_uring_cqe **cqe_ptr)
 {
 	if (!__io_uring_peek_cqe(ring, cqe_ptr, NULL) && *cqe_ptr)
 		return 0;
 
-	return io_uring_wait_cqe_nr(ring, cqe_ptr, 0);
+	return io_uring_wait_cqe_nr(ring, cqe_ptr, 0); // 等待一个io 完成
 }
 
 /*
  * Return an IO completion, waiting for it if necessary. Returns 0 with
  * cqe_ptr filled in on success, -errno on failure.
  */
+// 获取或者等待一个io 完成
 IOURINGINLINE int io_uring_wait_cqe(struct io_uring *ring,
 				    struct io_uring_cqe **cqe_ptr)
 {
 	if (!__io_uring_peek_cqe(ring, cqe_ptr, NULL) && *cqe_ptr)
 		return 0;
 
-	return io_uring_wait_cqe_nr(ring, cqe_ptr, 1);
+	return io_uring_wait_cqe_nr(ring, cqe_ptr, 1);  // // 等待1 个 io 完成
 }
 
 /*

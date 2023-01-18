@@ -14,6 +14,7 @@
  * awakened. For the latter case, we set the thread wakeup flag.
  * If no SQEs are ready for submission, returns false.
  */
+// 判断是否需要 调用enter， 如果是sqpoll 则返回false（sq thread没有休眠）
 static inline bool sq_ring_needs_enter(struct io_uring *ring,
 				       unsigned submit,
 				       unsigned *flags)
@@ -21,7 +22,7 @@ static inline bool sq_ring_needs_enter(struct io_uring *ring,
 	if (!submit)
 		return false;
 
-	if (!(ring->flags & IORING_SETUP_SQPOLL))
+	if (!(ring->flags & IORING_SETUP_SQPOLL)) //没有指定 sqpoll, 则需要 enter
 		return true;
 
 	/*
@@ -29,7 +30,7 @@ static inline bool sq_ring_needs_enter(struct io_uring *ring,
 	 * the flags.
 	 */
 	io_uring_smp_mb();
-
+    // 如果 sq thread 休眠了，则需要enter, 设置IORING_ENTER_SQ_WAKEUP 进行 唤醒
 	if (uring_unlikely(IO_URING_READ_ONCE(*ring->sq.kflags) &
 			   IORING_SQ_NEED_WAKEUP)) {
 		*flags |= IORING_ENTER_SQ_WAKEUP;
@@ -45,6 +46,7 @@ static inline bool cq_ring_needs_flush(struct io_uring *ring)
 				 (IORING_SQ_CQ_OVERFLOW | IORING_SQ_TASKRUN);
 }
 
+// 如果开启了 IORING_SETUP_IOPOLL， 则需要进去enter
 static inline bool cq_ring_needs_enter(struct io_uring *ring)
 {
 	return (ring->flags & IORING_SETUP_IOPOLL) || cq_ring_needs_flush(ring);
@@ -59,6 +61,7 @@ struct get_data {
 	void *arg;
 };
 
+// 是否 enter 系统调用 等待 cq继续
 static int _io_uring_get_cqe(struct io_uring *ring,
 			     struct io_uring_cqe **cqe_ptr,
 			     struct get_data *data)
@@ -73,8 +76,9 @@ static int _io_uring_get_cqe(struct io_uring *ring,
 		unsigned nr_available;
 		int ret;
 
+		// 1. 首先看下 是否有已经就绪的io
 		ret = __io_uring_peek_cqe(ring, &cqe, &nr_available);
-		if (ret) {
+		if (ret) { //发生错误
 			if (!err)
 				err = ret;
 			break;
@@ -93,9 +97,10 @@ static int _io_uring_get_cqe(struct io_uring *ring,
 			need_enter = true;
 		}
 		if (data->wait_nr > nr_available || need_enter) {
-			flags = IORING_ENTER_GETEVENTS | data->get_flags;
+			flags = IORING_ENTER_GETEVENTS | data->get_flags;  // 设置 IORING_ENTER_GETEVENTS 会等待io
 			need_enter = true;
 		}
+		// 判断是否需要 调用enter
 		if (sq_ring_needs_enter(ring, data->submit, &flags))
 			need_enter = true;
 		if (!need_enter)
@@ -110,6 +115,8 @@ static int _io_uring_get_cqe(struct io_uring *ring,
 
 		if (ring->int_flags & INT_FLAG_REG_RING)
 			flags |= IORING_ENTER_REGISTERED_RING;
+
+		//2. enter 进入，等待时间就绪
 		ret = __sys_io_uring_enter2(ring->enter_ring_fd, data->submit,
 					    data->wait_nr, flags, data->arg,
 					    data->sz);
@@ -136,7 +143,7 @@ int __io_uring_get_cqe(struct io_uring *ring, struct io_uring_cqe **cqe_ptr,
 		       unsigned submit, unsigned wait_nr, sigset_t *sigmask)
 {
 	struct get_data data = {
-		.submit		= submit,
+		.submit		= submit,  // 是否为 submit
 		.wait_nr 	= wait_nr,
 		.get_flags	= 0,
 		.sz		= _NSIG / 8,
@@ -365,14 +372,17 @@ int io_uring_wait_cqe_timeout(struct io_uring *ring,
  *
  * Returns number of sqes submitted
  */
+// 提交请求， 如果开启 sq poll， 则不需要io_uring_enter 系统调用
 static int __io_uring_submit(struct io_uring *ring, unsigned submitted,
 			     unsigned wait_nr, bool getevents)
 {
-	bool cq_needs_enter = getevents || wait_nr || cq_ring_needs_enter(ring);
+	bool cq_needs_enter = getevents || wait_nr || cq_ring_needs_enter(ring); //如果开启了 IORING_SETUP_IOPOLL， 则需要进去enter
 	unsigned flags;
 	int ret;
 
 	flags = 0;
+	// 判断是否需要 调用enter， 如果是sqpoll 则返回false（sq thread没有休眠）
+	// 如果设置了 IORING_SETUP_IOPOLL， 也是需要enter
 	if (sq_ring_needs_enter(ring, submitted, &flags) || cq_needs_enter) {
 		if (cq_needs_enter)
 			flags |= IORING_ENTER_GETEVENTS;
