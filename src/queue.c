@@ -62,6 +62,9 @@ struct get_data {
 };
 
 // 是否 enter 系统调用 等待 cq继续
+// retrieve a completed I/O request from the completion queue and is typically
+// called by the application after it has been notified of the availability of
+// a completion via a notification mechanism such as a signal or eventfd.
 static int _io_uring_get_cqe(struct io_uring *ring,
 			     struct io_uring_cqe **cqe_ptr,
 			     struct get_data *data)
@@ -208,6 +211,7 @@ again:
  * Sync internal state with kernel ring state on the SQ side. Returns the
  * number of pending items in the SQ ring, for the shared ring.
  */
+// 返回 SQ ring中 pending的items数量
 static unsigned __io_uring_flush_sq(struct io_uring *ring)
 {
 	struct io_uring_sq *sq = &ring->sq;
@@ -376,7 +380,9 @@ int io_uring_wait_cqe_timeout(struct io_uring *ring,
 static int __io_uring_submit(struct io_uring *ring, unsigned submitted,
 			     unsigned wait_nr, bool getevents)
 {
-	bool cq_needs_enter = getevents || wait_nr || cq_ring_needs_enter(ring); //如果开启了 IORING_SETUP_IOPOLL， 则需要进去enter
+	//如果 wait_nr > 0, 则需要enter
+	// 如果开启了 IORING_SETUP_IOPOLL，IORING_SQ_CQ_OVERFLOW， IORING_SQ_TASKRUN 则需要进去enter cq 去收割io
+	bool cq_needs_enter = getevents || wait_nr || cq_ring_needs_enter(ring);
 	unsigned flags;
 	int ret;
 
@@ -390,7 +396,7 @@ static int __io_uring_submit(struct io_uring *ring, unsigned submitted,
 			flags |= IORING_ENTER_REGISTERED_RING;
 
 		ret = __sys_io_uring_enter(ring->enter_ring_fd, submitted,
-					   wait_nr, flags, NULL);
+					   wait_nr, flags, NULL);  // 提交submitted个请求 并且  getevnet wait_nr
 	} else
 		ret = submitted;
 
@@ -407,6 +413,8 @@ static int __io_uring_submit_and_wait(struct io_uring *ring, unsigned wait_nr)
  *
  * Returns number of sqes submitted
  */
+// 等价于 io_uring_submit_and_wait(rint, 0)
+// 可能不enter
 int io_uring_submit(struct io_uring *ring)
 {
 	return __io_uring_submit_and_wait(ring, 0);
@@ -417,6 +425,9 @@ int io_uring_submit(struct io_uring *ring)
  *
  * Returns number of sqes submitted
  */
+// 必定会enter
+//  io_uring_submit_and_wait函数首先通过调用io_uring_submit向内核提交I/O请求。
+//  随后, 它等待内核完成wait_nr个I/O请求并通知进程。当wait_nr 哥I/O请求完成后, 进程将被唤醒, 并可以继续执行其他操作。
 int io_uring_submit_and_wait(struct io_uring *ring, unsigned wait_nr)
 {
 	return __io_uring_submit_and_wait(ring, wait_nr);

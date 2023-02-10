@@ -510,6 +510,12 @@ IOURINGINLINE unsigned __io_uring_prep_poll_mask(unsigned poll_mask)
 	return poll_mask;
 }
 
+// 监听 fds上 poll_mask 事件， 类似于 event_add
+// used to poll a file descriptor for events. It prepares a poll operation to be submitted to the io_uring instance.
+// The function takes a number of arguments, including the io_uring instance, the file descriptor to poll,
+// and the events to poll for. Once the poll operation has been prepared, it can be submitted to the io_uring instance
+// using the io_uring_submit function.
+//When the poll operation is completed, the results can be retrieved using the io_uring_wait_cqe function
 IOURINGINLINE void io_uring_prep_poll_add(struct io_uring_sqe *sqe, int fd,
 					  unsigned poll_mask)
 {
@@ -1119,6 +1125,7 @@ IOURINGINLINE int io_uring_sqring_wait(struct io_uring *ring)
 	return __io_uring_sqring_wait(ring);
 }
 
+// cq 中ready的entry 数量
 /*
  * Returns how many unconsumed entries are ready in the CQ ring
  */
@@ -1239,28 +1246,32 @@ IOURINGINLINE int __io_uring_peek_cqe(struct io_uring *ring,
  * Return an IO completion, if one is readily available. Returns 0 with
  * cqe_ptr filled in on success, -errno on failure.
  */
-//  获取一个（或等待） 完成的cqe, 并且返回 当前完成的事件数量
+// 当系统完成一个 I/O 操作时，它会将相关的完成项添加到完成队列中。应用程序可以通过调用 io_uring_peek_cqe
+// 来读取队列中的下一个完成项。该函数将返回指向下一个完成项的指针，或者在队列为空时返回 NULL。
+// io_uring_peek_cqe 不会从队列中删除完成项。这意味着同一个完成项可以多次使用，直到调用 io_uring_cqe_seen 函数来删除。
+// 非阻塞的
 IOURINGINLINE int io_uring_peek_cqe(struct io_uring *ring,
 				    struct io_uring_cqe **cqe_ptr)
 {
 	if (!__io_uring_peek_cqe(ring, cqe_ptr, NULL) && *cqe_ptr)
 		return 0;
 
-	return io_uring_wait_cqe_nr(ring, cqe_ptr, 0); // 等待一个io 完成
+	return io_uring_wait_cqe_nr(ring, cqe_ptr, 0); // 等待一个io 完成, 非阻塞的
 }
 
 /*
  * Return an IO completion, waiting for it if necessary. Returns 0 with
  * cqe_ptr filled in on success, -errno on failure.
  */
-// 获取或者等待一个io 完成
+// 当系统完成一个 I/O 操作时，它会将相关的完成项添加到完成队列中。应用程序可以通过调用 io_uring_wait_cqe 函数来等待并读取队列中的下一个完成项。
+// 该函数将阻塞，直到队列中有一个完成项可用，然后返回指向该完成项的指针
 IOURINGINLINE int io_uring_wait_cqe(struct io_uring *ring,
 				    struct io_uring_cqe **cqe_ptr)
 {
 	if (!__io_uring_peek_cqe(ring, cqe_ptr, NULL) && *cqe_ptr)
 		return 0;
 
-	return io_uring_wait_cqe_nr(ring, cqe_ptr, 1);  // // 等待1 个 io 完成
+	return io_uring_wait_cqe_nr(ring, cqe_ptr, 1);  // // 等待1 个 io 完成， 阻塞
 }
 
 /*
@@ -1270,6 +1281,7 @@ IOURINGINLINE int io_uring_wait_cqe(struct io_uring *ring,
  *
  * Returns a vacant sqe, or NULL if we're full.
  */
+// 从 sq ring中获取一个sqe,  返回NULL（已经满了）
 IOURINGINLINE struct io_uring_sqe *_io_uring_get_sqe(struct io_uring *ring)
 {
 	struct io_uring_sq *sq = &ring->sq;
@@ -1351,6 +1363,7 @@ IOURINGINLINE void io_uring_buf_ring_cq_advance(struct io_uring *ring,
 }
 
 #ifndef LIBURING_INTERNAL
+// 从 sq ring中获取一个sqe
 IOURINGINLINE struct io_uring_sqe *io_uring_get_sqe(struct io_uring *ring)
 {
 	return _io_uring_get_sqe(ring);
